@@ -1,87 +1,181 @@
-/* The base class of all symbols */
-class symbol_c {
+好的，這是一份關於 `symbol_c` 類別的研究報告的中文版本。
 
-  public:
-    /* WARNING: only use this method for debugging purposes!! */
-    virtual const char *absyntax_cname(void) {return "symbol_c";};
+# `symbol_c` 類別：編譯器抽象語法樹中符號表示的基礎
 
-    /*
-     * Annotations produced during stage 1_2
-     */    
-    /* Points to the parent symbol in the AST, i.e. the symbol in the AST that will contain the current symbol */
-    symbol_c *parent;
-    /* Some symbols may not be tokens, but may be clearly identified by a token.
-     * For e.g., a FUNCTION declaration is not itself a token, but may be clearly identified by the
-     * token_c object that contains it's name. Another example is an element in a STRUCT declaration,
-     * where the structure_element_declaration_c is not itself a token, but can be clearly identified
-     * by the structure_element_name
-     * To make it easier to find these tokens from the top level object, we will have the stage1_2 populate this
-     * token_c *token wherever it makes sense.
-     * NOTE: This was a late addition to the AST. Not all objects may be currently so populated.
-     *       If you need this please make sure the bison code is populating it correctly for your use case.
-     */
-    token_c  *token;
-    
-    /* Line number for the purposes of error checking.  */
-    int first_line;
-    int first_column;
-    const char *first_file;  /* filename referenced by first line/column */
-    long int first_order;    /* relative order in which it is read by lexcial analyser */
-    int last_line;
-    int last_column;
-    const char *last_file;  /* filename referenced by last line/column */
-    long int last_order;    /* relative order in which it is read by lexcial analyser */
+## 1. 引言：抽象語法樹在編譯中的基礎作用
 
-    int source;  /* 0: symbol from libraries, 1: symbol from user code */
+將原始碼編譯成可執行程式的過程涉及一系列複雜的轉換。首先，人類可讀的原始碼會經過詞法分析，分解成代表語言基本構建塊的符號串流 [1, 2]。接著，語法分析或剖析會取得這些符號，並根據程式語言的文法將它們組織起來，產生一個稱為抽象語法樹（AST）的階層式結構 [3, 4]。
 
-    /*
-     * Annotations produced during stage 3
-     */    
-    /*** Data type analysis ***/
-    std::vector <symbol_c *> candidate_datatypes; /* All possible data types the expression/literal/etc. may take. Filled in stage3 by fill_candidate_datatypes_c class */
-    /* Data type of the expression/literal/etc. Filled in stage3 by narrow_candidate_datatypes_c 
-     * If set to NULL, it means it has not yet been evaluated.
-     * If it points to an object of type invalid_type_name_c, it means it is invalid.
-     * Otherwise, it points to an object of the apropriate data type (e.g. int_type_name_c, bool_type_name_c, ...)
-     */
-    symbol_c *datatype;
-    /* The POU in which the symbolic variable (or structured variable, or array variable, or located variable, - any more?)
-     * was declared. This will point to a Configuration, Resource, Program, FB, or Function.
-     * This is set in stage 3 by the datatype analyser algorithm (fill/narrow) for the symbols:
-     *  symbolic_variable_c, array_variable_c, structured_variable_c
-     */
-    symbol_c *scope;    
+抽象語法樹作為一個關鍵的中間表示形式，它抽離了原始碼中具體的語法細節，例如分組括號和語句分隔符（如分號）[4]。相反地，它著重於程式的基本結構和內容相關的方面，將諸如表達式、語句和宣告等結構表示為樹中的節點 [4]。這個樹狀結構成為編譯器後續階段運作的核心資料結構，包括語義分析（檢查程式的意義和正確性）、最佳化（轉換程式碼以提高效能），以及最終的程式碼產生（產生目標機器碼）[4]。
 
-    /*** constant folding ***/
-    /* If the symbol has a constant numerical value, this will be set to that value by constant_folding_c */
-    const_value_c const_value;
-    
-    /*** Enumeration datatype checking ***/    
-    /* Not all symbols will contain the following anotations, which is why they are not declared here in symbol_c
-     * They will be declared only inside the symbols that require them (have a look at absyntax.def)
-     */
-    typedef std::multimap<std::string, symbol_c *, nocasecmp_c> enumvalue_symtable_t;
-    
-    /*
-     * Annotations produced during stage 4
-     */
-    /* Since we support several distinct stage_4 implementations, having explicit entries for each
-     * possible use would quickly get out of hand.
-     * We therefore simply add a map, that each stage 4 may use for all its needs.
-     */
-    typedef std::map<std::string, symbol_c *> anotations_map_t;
-    anotations_map_t anotations_map;
-    
+在這個抽象語法樹的核心是符號的概念，它代表程式中的實體，例如變數、函數或類型。`symbol_c` 類別作為這個抽象語法樹中所有這些符號的基本類別。它為每個程式實體持有必要的資訊和註解提供了一個通用的藍圖，從而在促進編譯過程的各個階段中扮演著關鍵的角色 [5, 6, 7, 8, 9]。
 
-  public:
-    /* default constructor */
-    symbol_c(int fl = 0, int fc = 0, const char *ffile = NULL /* filename */, long int forder=0, /* order in which it is read by lexcial analyser */
-             int ll = 0, int lc = 0, const char *lfile = NULL /* filename */, long int lorder=0  /* order in which it is read by lexcial analyser */
-            );
+## 2. 解構 `symbol_c` 基礎類別：程式符號的藍圖
 
-    /* default destructor */
-    /* must be virtual so compiler does not complain... */ 
-    virtual ~symbol_c(void) {return;};
+`symbol_c` 類別定義了編譯器抽象語法樹中所有特定符號類型共用的通用介面和資料成員。檢視其公開介面可以發現幾個成員類別，每個類別都對編譯管道的不同方面有所貢獻。
 
-    virtual void *accept(visitor_c &visitor) {return NULL;};
-};
+### 2.1. 除錯工具
+
+該類別提供了一個虛擬方法：`virtual const char *absyntax_cname(void) {return "symbol_c";};`。正如其註解所指出的，這個方法僅用於除錯目的。當在 `symbol_c` 的實例或其任何衍生類別上呼叫時，它會傳回一個字元字串，表示該類別的名稱。這使得開發人員在執行時期能夠識別符號物件的特定類型，這在追蹤編譯器的執行流程和診斷潛在問題時特別有用 [3]。這種執行時期內省的能力是開發和維護像編譯器這樣複雜系統的寶貴工具。
+
+### 2.2. 在階段 1_2（早期分析）產生的註解
+
+`symbol_c` 類別定義的這一部分包含在編譯的早期階段（主要是詞法和語法分析）填充的成員變數。
+
+#### 2.2.1. 父指標
+
+成員 `symbol_c *parent;` 是一個指向另一個 `symbol_c` 物件的指標，表示目前符號在抽象語法樹中的父符號 [10, 11]。這確立了抽象語法樹表示原始碼的基本階層式樹狀結構 [4, 10]。父指標允許向上遍歷樹，使編譯器能夠存取特定符號出現的上下文 [11, 12]。例如，為了確定變數的作用域，編譯器可能需要向上遍歷樹以找到封閉的函數或區塊 [11]。類似地，理解符號的語法角色（例如，識別符是否為賦值的一部分或函數呼叫）通常需要檢查其在抽象語法樹中的父節點 [12]。這個明確的父指標簡化了抽象語法樹的處理，尤其是在使用像訪問者模式這樣的設計模式時，因為它允許直接存取周圍的上下文，而無需在樹遍歷期間維護單獨的堆疊結構 [12]。
+
+#### 2.2.2. 符記連結
+
+成員 `token_c  *token;` 是一個指向 `token_c` 類型物件的指標。這個指標作為編譯器詞法分析階段的關鍵連結 [13]。在詞法分析期間，原始碼被掃描並分解成符記串流，其中每個符記代表語言的基本單元，例如關鍵字、識別符、運算符和字面值 [14, 15]。`token_c` 物件可能包含關於符記類型、它所代表的實際字元序列（詞素）以及它在原始碼中的位置（行號和列號）的資訊 [14, 15, 16, 17]。透過將抽象語法樹符號連結到其對應的符記，編譯器可以存取符號的原始文字表示及其原始位置 [18, 19]。這種連結對於錯誤報告尤其重要，它使編譯器能夠提供關於錯誤在原始碼中發生位置的精確資訊 [4]。程式碼中的註解指出這是抽象語法樹的後期新增功能，可能並非所有物件都已填充，這突顯了編譯器內部表示的持續演進和完善。
+
+#### 2.2.3. 原始碼位置和順序
+
+`symbol_c` 類別包含幾個專用於追蹤符號在原始碼中精確位置和順序的成員：`int first_line; int first_column; const char *first_file; long int first_order; int last_line; int last_column; const char *last_file; long int last_order;`。`first_*` 成員儲存符號在原始碼中開始的行號、列號和檔案名稱，以及一個 `first_order`，它可能表示詞法分析器讀取它的相對順序 [4, 20]。類似地，`last_*` 成員儲存符號結束的相應資訊。這種詳細的原始碼位置追蹤對於產生準確且有用的錯誤訊息至關重要，使編譯器能夠精確指出程式設計師程式碼中問題發生的位置 [4]。順序資訊（`first_order` 和 `last_order`）可能用於需要考慮原始碼中元素原始順序的分析或轉換，儘管其具體用例在註解中沒有明確定義 [2]。
+
+#### 2.2.4. 符號來源
+
+成員 `int source; /* 0: symbol from libraries, 1: symbol from user code */` 用於區分符號的來源 [3]。值為 0 表示符號來自程式庫，而值為 1 表示它來自使用者程式碼。這種區別在編譯的各個階段都很重要。例如，在連結期間，連結器需要解析來自使用者程式碼和外部程式庫的符號 [4]。在最佳化中，編譯器可能對程式庫函數（通常已經過最佳化）應用與使用者定義函數不同的策略 [21]。此外，在安全性分析中，了解程式碼的來源也可能相關。這種區分允許編譯器和連結器根據符號的來源處理它們，從而實現更有針對性和更有效的處理。
+
+### 2.3. 在階段 3（語義分析）產生的註解
+
+正如註解所指出的，編譯的階段 3 著重於語義分析，編譯器在此階段檢查程式的意義和正確性，而不僅僅是其語法結構。這包括諸如類型檢查和作用域解析等任務，而 `symbol_c` 類別包含用於儲存在此階段產生的註解的成員。
+
+#### 2.3.1. 候選資料類型
+
+成員 `std::vector <symbol_c *> candidate_datatypes;` 是一個向量，它儲存指向 `symbol_c` 物件的指標，表示目前符號（可能是表達式、字面值或其他結構）可能採用的所有可能資料類型 [22, 23]。在語義分析的初始階段，尤其是在具有類型推斷或多型等特性的語言中，符號的確切資料類型可能無法立即確定 [24, 25]。例如，整數字面值最初可能被認為是各種整數類型（`int`、`long` 等）的候選者 [26, 27]。這個向量作為編譯器追蹤這些可能性的方法，這些可能性會在分析進展且更多上下文資訊可用時被縮小範圍 [25]。
+
+#### 2.3.2. 已解析的資料類型
+
+成員 `symbol_c *datatype;` 是一個指向 `symbol_c` 物件的指標，它表示符號在類型分析階段之後的最終、已解析的資料類型 [28]。註解說明，如果這個指標是 `NULL`，則表示尚未評估資料類型。如果它指向 `invalid_type_name_c` 類型的物件，則表示它是無效的。否則，它指向適當資料類型的物件（例如 `int_type_name_c`、`bool_type_name_c` 等）。這個成員對於確保編譯程式的類型安全至關重要，因為它允許編譯器驗證操作是否在相容的資料類型上執行 [24, 28, 29]。
+
+#### 2.3.3. 作用域資訊
+
+成員 `symbol_c *scope;` 是一個指標，指向宣告符號變數（或結構化變數、陣列變數或定位變數）的程式組織單元（POU）[30, 31]。POU 是許多程式設計環境中的基本構建塊，可以表示組態、資源、程式、功能區塊（FB）或函數 [30, 31, 32, 33, 34, 35]。`scope` 成員在階段 3 由資料類型分析器演算法（填充/縮小）針對符號（如符號變數、陣列變數和結構化變數）設定。它在作用域管理中扮演著至關重要的角色，允許編譯器根據符號的宣告位置確定其可見性和生命週期 [36, 37, 38, 39, 40]。當編譯器遇到符號時，它會使用這個指標來理解其宣告的上下文並強制執行語言的作用域規則 [41]。
+
+### 2.4. 在階段 4（進一步分析/最佳化）產生的註解
+
+階段 4 代表可能發生進一步分析或最佳化的階段。為了適應不同階段 4 實作的多樣化需求，`symbol_c` 類別包含一個靈活的機制來儲存任意註解。
+
+#### 2.4.1. 註解映射
+
+該類別定義了一個 typedef `typedef std::map<std::string, symbol_c *> anotations_map_t;` 和一個成員 `anotations_map_t anotations_map;`。這個成員是一個標準的 C++ 映射，允許將字串鍵與指向 `symbol_c` 物件的指標相關聯。註解明確指出，由於可能存在幾個不同的階段 4 實作，因此為每個可能的用途設定明確的條目會很快變得難以管理。因此，這個映射提供了一個通用的方法，讓每個階段 4 實作都能夠儲存它需要的所有額外資訊或註解，並使用有意義的字串作為鍵來識別註解 [42]。這種設計促進了可擴展性，並防止基礎 `symbol_c` 類別因特定最佳化或分析傳遞的特定成員而變得雜亂。
+
+### 2.5. 常數折疊
+
+成員 `const_value_c const_value;` 用於儲存符號的常數數值（如果有的話）[43]。這個成員由稱為常數折疊的編譯器最佳化傳遞填充 [43, 44, 45, 46, 47]。常數折疊是一種技術，編譯器在編譯時期評估常數表達式（其運算元都是常數），而不是產生程式碼在執行時期計算它們。如果符號表示這樣的常數值，則這個成員將持有該值，允許編譯器潛在地將符號的使用替換為其預先計算的值，從而提高程式碼執行的效率 [43]。
+
+### 2.6. 列舉資料類型檢查
+
+該類別包含一個 typedef `typedef std::multimap<std::string, symbol_c *, nocasecmp_c> enumvalue_symtable_t;`。然而，這個 typedef 並未宣告為 `symbol_c` 類別的直接成員。註解指出，與列舉資料類型檢查相關的註解並未在此處的 `symbol_c` 中宣告，而是僅在需要它們的特定符號內宣告，如 `absyntax.def` 中所定義。這表示雖然基礎類別提供了基礎，但表示列舉的特定符號類型將擁有自己的專用成員，用於儲存與列舉值及其類型檢查相關的資訊。使用具有不區分大小寫比較函數 (`nocasecmp_c`) 的 `std::multimap` 可能與列舉值的儲存和查找方式有關，可能允許具有相同名稱但大小寫不同的多個列舉成員，儘管這在大多數程式設計語言中通常被視為錯誤。
+
+### 2.7. 訪問者模式的虛擬方法
+
+方法 `virtual void *accept(visitor_c &visitor) {return NULL;};` 是一個虛擬函數，在編譯器中實作訪問者設計模式中扮演著關鍵的角色 [48, 49, 50]。訪問者模式是一種行為設計模式，允許在不修改這些元素類別的情況下，向物件結構（在此案例中，是由 `symbol_c` 階層表示的抽象語法樹）的元素新增新的操作 [48, 49, 50]。`accept` 方法是允許 `visitor_c` 物件「訪問」`symbol_c` 物件的入口點。當特定類型的訪問者呼叫符號的 `accept` 方法時，符號反過來會呼叫訪問者物件上的特定 `visit` 方法，並將自身作為引數傳遞 [42, 51, 52, 53, 54, 55, 56, 57, 58]。這種機制，通常稱為雙重分派，使訪問者能夠執行針對其目前操作的特定符號類型量身定制的程式碼。這種模式廣泛應用於編譯器中，以模組化和可擴展的方式實作各種傳遞，例如類型檢查、程式碼產生和最佳化 [42]。
+
+下表總結了 `symbol_c` 類別的成員變數及其主要用途：
+
+| 成員變數名稱 | 資料類型 | 描述和用途 | 主要使用的編譯階段 |
+|---|---|---|---|
+| `parent` | `symbol_c *` | 指向抽象語法樹中父符號的指標，用於向上遍歷和存取上下文。 | 階段 1_2（語法分析） |
+| `token` | `token_c *` | 指向詞法分析中對應符記的指標，連結回原始碼。 | 階段 1_2（語法分析） |
+| `first_line`, `first_column`, `first_file`, `first_order` | `int`, `const char *`, `long int` | 關於符號在原始碼中起始位置和順序的資訊。 | 階段 1_2（詞法分析） |
+| `last_line`, `last_column`, `last_file`, `last_order` | `int`, `const char *`, `long int` | 關於符號在原始碼中結束位置和順序的資訊。 | 階段 1_2（詞法分析） |
+| `source` | `int` | 指示符號是來自程式庫還是使用者程式碼。 | 階段 1_2（可能用於連結和最佳化） |
+| `candidate_datatypes` | `std::vector <symbol_c *>` | 在初始語義分析期間儲存符號的可能資料類型列表。 | 階段 3（語義分析） |
+| `datatype` | `symbol_c *` | 儲存類型分析後符號的最終解析資料類型。 | 階段 3（語義分析） |
+| `scope` | `symbol_c *` | 指向宣告符號的程式組織單元（POU），用於作用域管理。 | 階段 3（語義分析） |
+| `anotations_map` | `anotations_map_t` | 用於儲存與符號相關的任意註解的映射，由不同的階段 4 實作使用。 | 階段 4（進一步分析/最佳化） |
+| `const_value` | `const_value_c` | 如果由常數折疊確定，則儲存符號的常數數值。 | 階段 3（語義分析/最佳化） |
+
+## 3. 早期編譯階段（階段 1_2）：建立基礎
+
+編譯的初始階段，通常稱為前端，對於建立原始碼的基本結構和資訊至關重要。正如註解中所述，階段 1_2 可能包含詞法分析和語法分析，而 `symbol_c` 類別旨在捕獲這些階段的基本細節。
+
+### 3.1. 抽象語法樹階層和遍歷 (`parent`)
+
+`symbol_c` 類別中的 `parent` 指標對於建構和導覽抽象語法樹的階層結構至關重要 [10, 11]。抽象語法樹將程式的結構表示為節點樹，其中每個節點對應於原始碼中的一個結構。每個 `symbol_c` 物件中的 `parent` 指標建立了「包含於」的關係，將符號連結到程式結構中直接包含它的符號 [4, 10]。例如，函數內的變數宣告會將函數的符號作為其父符號。這種階層式組織對於許多編譯器分析至關重要。向上遍歷，由 `parent` 指標促進，允許編譯器確定符號的上下文 [11, 12]。例如，在解析變數名稱時，編譯器可能需要從變數的使用向上遍歷樹，以在適當的作用域中找到其宣告 [11]。類似地，理解程式碼片段的語法角色通常涉及檢查其在抽象語法樹中的祖先。這個直接連結的存在簡化了處理抽象語法樹的演算法的實作，尤其是在使用訪問者模式時，因為訪問者可以輕鬆存取必要的上下文資訊，而無需在遍歷樹期間維護明確的呼叫堆疊或其他輔助資料結構 [12]。
+
+### 3.2. 連結到原始碼 (`token`, `token_c`)
+
+編譯過程始於詞法分析，原始碼在此階段被轉換為符記串流 [2, 14, 15]。這些符記是程式語言的基本有意義的單元，代表關鍵字、識別符、運算符和字面值 [2]。接著，語法分析（剖析）取得符記串流並根據語言的文法建構抽象語法樹 [3, 4, 18, 19]。`symbol_c` 類別的 `token` 成員作為這兩個階段之間的關鍵橋樑 [13]。它指向一個 `token_c` 物件，該物件通常會保存關於產生抽象語法樹中對應 `symbol_c` 物件的特定符記的詳細資訊 [5, 59]。這個 `token_c` 物件可能包含諸如符記類型（例如，識別符、關鍵字、運算符）、原始碼中的實際字元序列（詞素）以及符記的精確位置（行號和列號）等屬性 [14, 15, 16, 17, 60]。這種連結對於各種編譯器任務至關重要，最值得注意的是產生資訊豐富的錯誤訊息，這些訊息直接指向原始碼中檢測到語義或語法問題的位置 [4]。此外，這種連結可以被需要根據抽象語法樹中的結構化表示來操作原始碼的原始碼轉換或重構工具所利用。
+
+### 3.3. 追蹤原始碼位置和順序
+
+`symbol_c` 類別的 `first_*` 和 `last_*` 成員（`first_line`、`first_column`、`first_file`、`first_order`、`last_line`、`last_column`、`last_file`、`last_order`）專用於精確記錄每個符號在原始碼中出現的確切位置和順序 [4, 20]。`first_line`、`first_column` 和 `first_file` 成員表示符號的起始位置，而 `last_line`、`last_column` 和 `last_file` 表示其結束位置。`first_order` 和 `last_order` 成員可能捕獲詞法分析器在輸入串流中遇到符號的相對順序 [2]。這種細緻的原始碼位置追蹤對於在編譯期間遇到錯誤時，向開發人員提供精確且可操作的回饋至關重要 [4]。透過精確指出問題發生的行和列，編譯器顯著地幫助了除錯過程。此外，關於符號處理順序的資訊可能對於需要維護或分析原始程式中元素時間順序的特定類型的靜態分析或程式碼轉換很有價值。
+
+### 3.4. 區分符號來源 (`source`)
+
+`source` 成員是一個整數，可以取值 0 或 1，用於區分來自外部程式庫的符號和使用者程式碼中定義的符號 [3]。這種區別在編譯和連結階段至關重要。在連結過程中，連結器依賴此資訊來正確解析對單獨程式庫檔案中定義的符號的引用 [4]。例如，如果使用者程式碼呼叫標準程式庫中的函數，連結器會使用符號表和來源資訊來找到該程式庫函數的已編譯程式碼。此外，這種區別可能會影響編譯器採用的最佳化策略。程式庫程式碼通常是預先編譯的，可能已經過最佳化，因此可能與使用者編寫的程式碼以不同的方式處理。在某些情況下，例如安全性分析或產生部署套件時，識別不同程式碼組件的來源也可能相關。因此，`source` 成員提供了一種簡單而有效的方法，讓編譯器根據符號的來源管理和處理符號。
+
+## 4. 語義分析和類型解析（階段 3）：確保意義和正確性
+
+編譯的階段 3 主要關注語義分析，編譯器在此階段深入研究程式的意義，確保它不僅僅符合語法結構，還符合語言的規則。這個階段包括類型檢查和作用域解析等關鍵任務，而 `symbol_c` 類別提供了特定的成員來促進這些操作。
+
+### 4.1. 候選資料類型 (`candidate_datatypes`)
+
+在語義分析期間，特別是類型分析的初始步驟中，編譯器需要確定與每個表達式、變數和其他程式結構相關聯的資料類型 [28, 29]。在許多程式設計語言中，尤其是在具有類型推斷或隱式類型轉換等特性的語言中，符號的確切類型可能無法立即顯而易見 [24, 25]。例如，在分析早期遇到的整數字面值可能是各種整數類型（例如 `int`、`short` 或 `long`）的潛在候選者，具體取決於它在程式碼中的使用上下文 [26, 27]。`candidate_datatypes` 成員，一個指向 `symbol_c` 物件的指標向量，用於儲存給定符號的所有這些潛在資料類型 [22, 23]。隨著語義分析的進展，編譯器收集更多關於符號的使用和上下文的資訊，然後它可以縮小這個候選類型列表，直到解析出單個明確的類型 [25]。這種機制對於處理重載函數或運算符特別有用，因為它們的正確解釋取決於運算元或引數的類型。
+
+### 4.2. 縮小類型範圍 (`datatype`)
+
+類型檢查的過程包括驗證程式中執行的操作對於所涉及的運算元的資料類型是否有效 [24, 28]。另一方面，類型推斷是根據表達式的組成部分及其周圍上下文的類型自動推導表達式的資料類型的過程 [24, 28]。`symbol_c` 類別的 `datatype` 成員儲存這些類型分析過程的結果。它是一個指向 `symbol_c` 物件的指標，該物件表示符號的最終、已解析的資料類型。程式碼中的註解提供了關於這個指標可能狀態的重要資訊。如果它是 `NULL`，則表示尚未確定符號的資料類型。如果它指向 `invalid_type_name_c` 類型的物件，則表示檢測到類型錯誤，這意味著編譯器無法找到符號的有效類型，或者它正在以不相容的方式使用 [61, 62, 63, 64, 65, 66, 67, 68, 69]。否則，`datatype` 指標將指向一個 `symbol_c` 物件，該物件表示符號的特定資料類型，例如整數類型 (`int_type_name_c`)、布林類型 (`bool_type_name_c`) 或使用者定義的類型。這種已解析的類型資訊對於後續的編譯階段（尤其是程式碼產生）至關重要，因為編譯器需要產生適合於已確定資料類型的機器指令。
+
+### 4.3. 作用域管理 (`scope`)
+
+程式設計語言中的作用域是指程式中特定識別符（如變數名稱）有效且可存取的區域 [36, 40]。程式組織單元（POU），例如函數、功能區塊、程式、組態和資源，通常定義不同的作用域 [30, 31, 32, 33, 34, 35]。`symbol_c` 類別的 `scope` 成員，一個指向另一個 `symbol_c` 物件的指標，在管理這些作用域方面扮演著至關重要的角色。它指向目前符號（通常是變數或函數）最初宣告的 POU [37, 38, 39, 41, 70, 71, 72]。在語義分析期間，尤其是在解析識別符的意義時，編譯器會使用這個 `scope` 指標來確定符號宣告的上下文。當遇到符號時，編譯器首先在目前作用域中搜尋其宣告。如果找不到，則可能會在封閉的作用域中搜尋，遵循基於語言作用域語義的預定義規則集 [37, 41]。這種階層式搜尋會持續進行，直到找到符號或到達最外層的作用域。因此，`scope` 成員提供了必要的連結到宣告上下文，使編譯器能夠強制執行程式設計語言的作用域規則並防止命名衝突等問題。
+
+下表提供了一些常見的程式組織單元（POU）及其與 `scope` 成員的相關性範例：
+
+| POU 類型 | 描述和典型用途 | 與 `scope` 成員的相關性 |
+|---|---|---|
+| 組態 (Configuration) | 代表整個系統組態，包括硬體和軟體組件。 | 在組態 POU 中宣告的符號可能在該組態中具有全域作用域。 |
+| 資源 (Resource) | 代表組態中特定的硬體資源，例如 CPU 或記憶體。 | 在資源 POU 中宣告的符號可能特定於該硬體單元。 |
+| 程式 (Program) | 代表應用程式邏輯的主要部分，包含函數和功能區塊的網路。 | 在程式 POU 中宣告的變數和函數通常具有限於該程式的作用域，或者可以在專案中是全域的。 |
+| FB (功能區塊) | 具有內部記憶體的重複使用程式碼片段，即使輸入相同，由於其狀態，也能產生不同的輸出。 | 在功能區塊 POU 中宣告的變數通常是該功能區塊實例的局部變數。 |
+| 函數 (Function) | 執行特定任務並傳回值的子程式，在呼叫之間不維護內部狀態。 | 在函數 POU 中宣告的變數是該函數執行的局部變數。 |
+
+### 4.4. 常數折疊最佳化 (`const_value`)
+
+常數折疊是一種編譯器最佳化技術，旨在透過在編譯時期評估僅涉及常數值的表達式，而不是產生程式碼在執行時期計算它們，來提高產生程式碼的效率 [43, 44, 45, 46, 47]。在階段 3（或可能是一個專用的最佳化傳遞）期間，編譯器會分析抽象語法樹並識別所有運算元都是常數的表達式。然後它會執行計算並儲存結果常數值。`symbol_c` 類別的 `const_value` 成員用於儲存表示這種常數表達式結果的符號的預先計算的常數值 [73, 74, 75, 76, 77]。透過儲存這個值，編譯器稍後可以在產生的機器碼中將原始常數表達式的使用替換為其直接值。這可以透過減少需要在執行時期完成的計算量來提高效能 [43]。例如，表達式 `2 + 3 * 4` 可能在編譯時期評估為 `14`，並且對應符號的 `const_value` 成員將儲存 `14`。然後，在最終程式碼中，對這個表達式的後續使用將直接替換為 `14`。
+
+## 5. 可擴展性和自訂註解（階段 4）：促進進階分析
+
+編譯過程的階段 4 通常涉及更進階的分析、最佳化或轉換，這些都需要將額外的資訊與抽象語法樹中的符號相關聯 [42]。為了適應各種階段 4 實作可能不同的需求，而無需修改 `symbol_c` 類別的核心結構，提供了一種靈活的機制來儲存任意註解。
+
+### 5.1. 註解映射 (`anotations_map`)
+
+`anotations_map` 成員是一個標準的 C++ 映射，其中字串鍵與指向 `symbol_c` 物件的指標相關聯，它作為這種可擴展的註解機制。正如程式碼中的註解所指出的，為每個可能的階段 4 需求在 `symbol_c` 類別中設定專用成員會很快變得難以管理。相反，每個階段 4 實作都可以使用這個映射來儲存它需要的關於特定符號的任何特定資料，並使用有意義的字串作為鍵來識別註解 [42]。例如，一個階段 4 傳遞可能執行資料流分析，並使用特定鍵將關於變數的到達定義的資訊儲存在這個映射中。另一個傳遞可能追蹤記憶體位置之間潛在的別名，並將該資訊儲存在不同的鍵下。這種方法允許高度的靈活性和模組化，因為不同的階段 4 分析可以獨立運作，並將其結果附加到符號上，而無需了解或干擾其他傳遞的註解。它遵循軟體設計的開放/封閉原則，允許新增新功能（階段 4 傳遞），而無需修改基礎 `symbol_c` 類別。
+
+## 6. 啟用多型操作 (`accept` 和訪問者模式)
+
+`symbol_c` 類別中的 `accept(visitor_c &visitor)` 方法是編譯器中訪問者設計模式實作的基石 [48, 49, 50]。這種模式提供了一種結構化的方式，可以在不更改這些元素類別本身的情況下，對物件階層（在此案例中，是由 `symbol_c` 類別及其衍生類別表示的抽象語法樹）的元素執行各種操作 [48, 49, 50]。
+
+當特定的編譯器傳遞（實作為「訪問者」物件）需要對抽象語法樹進行操作時，它首先呼叫 `symbol_c` 物件（或其衍生類別之一的物件）的 `accept` 方法 [42, 51, 52, 53, 54, 55, 56, 57, 58]。在 `symbol_c` 類別（或更可能是其衍生類別的 `accept` 方法）的 `accept` 方法內部，然後會呼叫訪問者物件上的特定 `visit` 方法，並將目前的符號物件（由 `this` 指向）作為引數傳遞給這個 `visit` 方法。呼叫的特定 `visit` 方法取決於符號物件的實際執行時期類型 [42, 51, 52, 53, 54, 55, 56, 57, 58]。這個過程，稱為雙重分派，使訪問者能夠執行專門針對其目前訪問的符號類型量身定制的程式碼。
+
+例如，編譯器可能有一個 `TypeCheckingVisitor`，負責確保程式符合語言的類型規則。這個訪問者可能會為不同類型的符號實作不同的 `visit` 方法，例如 `visitVariableSymbol`、`visitFunctionCallSymbol` 和 `visitAssignmentSymbol`，每個方法都包含針對該特定符號種類的類型檢查邏輯。類似地，`CodeGenerationVisitor` 會具有產生每種抽象語法樹節點的適當目標程式碼的 `visit` 方法。
+
+訪問者模式在編譯器設計中提供了幾個優點。它促進了關注點的清晰分離，因為每個編譯器傳遞的邏輯都封裝在一個單獨的訪問者類別中。它還增強了可擴展性，因為可以透過簡單地建立新的訪問者類別來新增新的編譯器傳遞，而無需修改現有的 `symbol_c` 階層。這使得編譯器的程式碼庫更模組化、更易於維護，並且更能適應新的需求或語言特性。
+
+下表提供了如何使用訪問者模式來實作不同編譯器傳遞的範例：
+
+| 編譯器傳遞 | 範例訪問者類別名稱 | 訪問者的目的 |
+|---|---|---|
+| 類型檢查 | `TypeCheckingVisitor` | 遍歷抽象語法樹並強制執行程式設計語言的類型規則，報告任何類型錯誤。 |
+| 程式碼產生 | `CodeGenerationVisitor` | 取得（可能經過最佳化和類型檢查的）抽象語法樹並產生目標平台的對應機器碼。 |
+| 最佳化 | `OptimizationVisitor` | 分析抽象語法樹以識別程式碼最佳化的機會（例如，常數折疊、無用程式碼消除），並相應地轉換抽象語法樹。 |
+| 符號表填充 | `SymbolTableVisitor` | 遍歷抽象語法樹並使用關於宣告的識別符的資訊填充編譯器的符號表。 |
+
+## 7. `symbol_c` 在編譯器符號表中的角色
+
+符號表是編譯器中一個基本的資料結構，它作為儲存程式中使用的所有識別符（符號）相關資訊的儲存庫 [38, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89]。`symbol_c` 類別的實例，以及其代表特定符號類型（如變數、函數、類別等）的衍生類別，通常構成這個符號表中的條目。
+
+`symbol_c` 類別的各種成員變數旨在儲存與每個符號相關的關鍵屬性。例如，符號的名稱可以透過 `token` 成員（指向詞素）存取。符號的已解析資料類型儲存在 `datatype` 成員中，而其宣告的作用域由 `scope` 成員指示。符號在原始程式碼中的來源位置由 `first_*` 和 `last_*` 成員追蹤。
+
+符號表在整個編譯過程中都被使用。在詞法分析期間，當遇到識別符時，會在符號表中建立新的條目（很可能是 `symbol_c` 的衍生類別的實例）[38]。在語法分析中，關於符號的屬性、作用域和其他屬性的資訊可能會新增到其在表中的條目 [38]。語義分析嚴重依賴符號表來執行類型檢查和作用域解析 [78]。例如，當編譯器遇到正在使用的變數時，它會在符號表中查找其條目以驗證其類型並確保它在宣告的作用域內使用。在中間程式碼產生和目標程式碼產生期間，編譯器會查詢符號表以確定變數的記憶體分配並產生正確存取符號的程式碼 [38]。
+
+因此，`symbol_c` 類別作為編譯器基礎架構中表示符號的基本構建塊，其成員經過精心設計，以保存編譯管道的不同階段正確理解和處理程式符號所需的基本資訊。
+
+## 8. 結論：良好定義的符號基礎類別的重要性
+
+總之，`symbol_c` 基礎類別透過為抽象語法樹中所有程式符號的表示提供結構化且可擴展的基礎，在編譯器的架構中扮演著關鍵的角色。其精心設計的成員變數促進了編譯過程的各種重要方面。原始碼位置和順序的追蹤使得能夠進行精確的錯誤報告和潛在的原始碼級別操作。與資料類型相關的成員（`candidate_datatypes` 和 `datatype`）對於語義分析和確保類型正確性至關重要。`scope` 成員對於實作語言的作用域規則至關重要，而 `const_value` 支援常數折疊最佳化。此外，`anotations_map` 提供了一種靈活的方式來擴展符號的功能，以用於後續編譯階段中的進階分析。最後，包含 `accept` 方法（啟用訪問者設計模式）提供了一種乾淨且模組化的方法來實作在抽象語法樹上運作的不同編譯器傳遞。因此，像 `symbol_c` 這樣良好定義的符號基礎類別對於建構穩健、高效且可維護的編譯器是不可或缺的。
